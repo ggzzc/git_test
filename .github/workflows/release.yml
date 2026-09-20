@@ -4,7 +4,13 @@
 # 触发：推送形如 v* 的标签，例如
 #     git tag -a v0.2.0 -m "v0.2.0: ..."
 #     git push origin v0.2.0
-# 产物：dist/calc_demo-<平台>[.exe] + SHA256SUMS.txt，上传到对应的 GitHub Release
+# 结构（两个作业）：
+#   build   —— 矩阵编译 linux/windows，各自把产物作为 artifact 上传
+#   publish —— 单作业串行执行：下载全部 artifact、生成覆盖所有平台的
+#              SHA256SUMS.txt、一次性创建 Release
+#   这样做的原因：
+#     ① 校验和清单覆盖所有平台，不会像"每个平台各传一份同名文件"那样互相覆盖；
+#     ② 创建 Release 的逻辑只有一处，不存在并发竞争。
 #
 # 为什么用 gh CLI 而不是 softprops/action-gh-release 这类第三方 action：
 #   * gh 已预装在 GitHub 托管的 runner 上，无需再引入依赖
@@ -21,8 +27,11 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: build & publish (${{ matrix.name }})
+  # ------------------------------------------------------------------
+  # 1) 构建：矩阵编译两个平台，产物以 artifact 形式交给 publish 作业
+  # ------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -51,10 +60,8 @@ jobs:
       - name: 单元测试
         run: ctest --test-dir build -C Release --output-on-failure
 
-      # 统一产物命名并生成校验和。
-      # 用 bash：Windows runner 上也自带 Git Bash，且两个平台都有 sha256sum。
-      # 注意 sha256sum 的 glob 要写成 calc_demo-*，否则会把刚创建的空
-      # SHA256SUMS.txt 自身也算进去（重定向先建文件，glob 后展开）。
+      # 统一产物命名。校验和统一交给 publish 作业生成，
+      # 这样两个平台不会各传一份同名清单而互相覆盖。
       - name: 打包
         shell: bash
         run: |
@@ -64,18 +71,51 @@ jobs:
           else
             cp build/Release/calc_demo.exe "dist/calc_demo-${{ matrix.name }}.exe"
           fi
+          ls -l dist
+
+      - name: 上传为 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # 2) 发布：串行执行（needs: build），合并所有平台产物后一次性创建 Release
+  # ------------------------------------------------------------------
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载全部构建产物
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 校验产物齐全并生成校验和清单
+        shell: bash
+        run: |
           cd dist
+          ls -l
+          count=$(ls calc_demo-* | wc -l)
+          if [ "$count" -lt 2 ]; then
+            echo "预期 2 个平台产物，实际只有 $count 个" >&2
+            exit 1
+          fi
+          # glob 写 calc_demo-*：若写成 * 会把刚创建的空 SHA256SUMS.txt 也算进去
           sha256sum calc_demo-* > SHA256SUMS.txt
+          echo '--- SHA256SUMS.txt ---'
           cat SHA256SUMS.txt
 
-      # 两个平台并行时：谁先到谁创建 Release，另一个只上传文件
-      - name: 创建或更新 Release
+      - name: 创建 Release 并上传全部产物
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          # 已存在时会报错，忽略即可（这正是并发时的正常情况）
-          gh release create "$tag" --title "$tag" --generate-notes || true
-          # 上传本平台产物；同一文件重复上传时覆盖
-          gh release upload "$tag" dist/* --clobber
+          gh release create "$tag" dist/* \
+            --title "$tag" \
+            --generate-notes \
+            --verify-tag
