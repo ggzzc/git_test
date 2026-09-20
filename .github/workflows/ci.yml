@@ -54,8 +54,10 @@ jobs:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
     steps:
+      # checkout v5 面向 Node.js 24；v4 面向 Node.js 20，会触发
+      # "Node.js 20 is deprecated" 警告（每个作业一条，共 7 条）
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # 单配置生成器（Linux/macOS 的 Unix Makefiles）：构建类型在配置阶段决定
       - name: 配置（单配置生成器）
@@ -112,7 +114,7 @@ jobs:
       CXX: ${{ matrix.cxx }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 配置（开启 -Werror / /WX）
         run: cmake -S . -B build-strict ${{ matrix.configureArgs }} -DENABLE_WERROR=ON
