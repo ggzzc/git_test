@@ -115,7 +115,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME}"
+          echo "tag=$tag  repo=${GITHUB_REPOSITORY}"
+          ls -l dist
+          # 本作业没有 actions/checkout，工作区里没有 .git 目录，
+          # gh 无法从 git remote 推断要操作哪个仓库，必须用 --repo 显式指定。
           gh release create "$tag" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "$tag" \
             --generate-notes \
             --verify-tag
