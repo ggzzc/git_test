@@ -77,3 +77,48 @@ jobs:
       - name: 冒烟运行 demo（非 Windows）
         if: runner.os != 'Windows'
         run: ./build/calc_demo
+
+  # ==================================================================
+  # 第 2 步：严格告警（告警即错误）
+  #   ENABLE_WERROR=ON -> GCC/Clang 追加 -Werror、MSVC 追加 /WX
+  #   与 build-and-test 的区别：那边的告警只是打印，这里的告警直接让作业失败
+  # ==================================================================
+  strict-warnings:
+    name: strict warnings (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+            configureArgs: '-DCMAKE_BUILD_TYPE=Release'
+          - name: linux-clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+            configureArgs: '-DCMAKE_BUILD_TYPE=Release'
+          # 多配置生成器（Visual Studio）不使用 CMAKE_BUILD_TYPE，
+          # 因此这里留空不传，构建类型交给下面的 --config Release。
+          - name: windows-msvc
+            os: windows-latest
+            cc: ''
+            cxx: ''
+            configureArgs: ''
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置（开启 -Werror / /WX）
+        run: cmake -S . -B build-strict ${{ matrix.configureArgs }} -DENABLE_WERROR=ON
+
+      - name: 编译（只要有一条告警就失败）
+        run: cmake --build build-strict --config Release --parallel
+
+      - name: 单元测试（严格模式下也确认行为不变）
+        run: ctest --test-dir build-strict -C Release --output-on-failure

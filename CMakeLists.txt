@@ -42,6 +42,19 @@ elseif(MSVC)
     endif()
 endif()
 
+# --- 可选：把编译告警当作错误 ---
+# CI 的 strict-warnings 作业开启它；本地也可随时打开做自检：
+#   cmake -S . -B build-strict -DENABLE_WERROR=ON
+#   或者： make cb P=mingw  之前先在预设里加该变量（见 CMakePresets.json）
+option(ENABLE_WERROR "把编译告警当作错误处理（GCC/Clang: -Werror，MSVC: /WX）" OFF)
+if(ENABLE_WERROR)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(calc_warnings INTERFACE -Werror)
+    elseif(MSVC)
+        target_compile_options(calc_warnings INTERFACE /WX)
+    endif()
+endif()
+
 # --- 核心运算做成静态库：演示程序和单元测试共用同一份实现 ---
 add_library(calc STATIC src/calc.c)
 # PUBLIC：链接 calc 的目标自动获得 -Iinc（对应 Makefile 的 -Iinc）
