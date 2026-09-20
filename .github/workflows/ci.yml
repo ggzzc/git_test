@@ -1,0 +1,79 @@
+# ==================================================================
+# CI —— 阶段 2 第 1 步：多平台编译 + 单元测试
+# ------------------------------------------------------------------
+# 覆盖四种工具链组合，确保代码在 gcc / clang / MSVC 下都能编译并通过测试：
+#   linux-gcc、linux-clang、macos-clang（AppleClang）、windows-msvc
+# 这里刻意使用"原始 CMake 命令"而不是本仓库的预设：
+#   预设里的 mingw 使用 MinGW Makefiles 生成器，Linux/macOS runner 没有它。
+# ------------------------------------------------------------------
+# 后续步骤会在本文件追加作业：
+#   第 2 步：-Werror 严格编译（告警即错误）
+#   第 3 步：cppcheck 静态分析
+#   第 4 步：clang-tidy 语义级检查
+# ==================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**']
+  pull_request:
+    branches: [main, develop]
+
+# 同一分支连续推送时取消上一个未跑完的任务，节省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build & test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - name: linux-clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - name: macos-clang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+          # Windows 用默认生成器（Visual Studio 2022）。
+          # VS 生成器不读取 CC/CXX 环境变量，因此这里留空。
+          - name: windows-msvc
+            os: windows-latest
+            cc: ''
+            cxx: ''
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 单配置生成器（Linux/macOS 的 Unix Makefiles）：构建类型在配置阶段决定
+      - name: 配置（单配置生成器）
+        if: runner.os != 'Windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      # 多配置生成器（Windows 的 Visual Studio）：构建类型在编译阶段用 --config 决定，
+      # 这里传 CMAKE_BUILD_TYPE 是无效的，会打印 "Manually-specified variables were not used" 警告
+      - name: 配置（多配置生成器）
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build
+
+      - name: 编译
+        run: cmake --build build --config Release --parallel
+
+      - name: 单元测试
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: 冒烟运行 demo（非 Windows）
+        if: runner.os != 'Windows'
+        run: ./build/calc_demo
