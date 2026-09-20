@@ -1,0 +1,124 @@
+# ------------------------------------------------------------------
+# 1. Dependency files
+#    !*.d/ must stay right after *.d: it keeps "*.d" directories
+#    unignored so git still descends into them (order matters).
+# ------------------------------------------------------------------
+*.d
+!*.d/
+
+# ------------------------------------------------------------------
+# 2. Object files and compiler intermediates
+# ------------------------------------------------------------------
+*.o
+*.obj
+*.ko
+*.lo
+*.gch
+*.pch
+*.su
+
+# ------------------------------------------------------------------
+# 3. Static library / Dynamic library
+# ------------------------------------------------------------------
+*.a
+*.lib
+*.la
+*.so
+*.so.*
+*.dll
+*.dylib
+
+# ------------------------------------------------------------------
+# 4. Executables and binary images
+# ------------------------------------------------------------------
+*.exe
+*.out
+*.app
+*.elf
+*.bin
+*.hex
+*.mot
+*.srec
+
+# ------------------------------------------------------------------
+# 5. Linker, debug, coverage and profiling output
+#    /core is anchored to this file's directory, so nested "core"
+#    directories are not affected.
+# ------------------------------------------------------------------
+*.ilk
+*.exp
+*.map
+*.pdb
+*.idb
+*.dSYM
+*.gcno
+*.gcda
+*.gcov
+*.profraw
+/core
+
+# ------------------------------------------------------------------
+# 6. Build directory
+# ------------------------------------------------------------------
+build/
+cmake-build-*/
+/out/
+/bin/
+
+# ------------------------------------------------------------------
+# 7. Editors / IDEs / code indexing
+# ------------------------------------------------------------------
+.vscode
+.copilot
+.vs
+.qtcreator
+.metadata
+.settings
+*.user
+*.code-workspace
+/.cproject
+/.project
+/.gdbinit
+/cscope.*
+/tags
+/TAGS
+.ccls-cache
+.cache/
+compile_commands.json
+*.pyc
+
+**/TriCoreAURIX/Projects/*/Coverage
+**/TriCoreAURIX/Projects/*/Moduletest
+**/TriCoreAURIX/Projects/*/Release
+**/TriCoreAURIX/Projects/*/Debug
+
+# ------------------------------------------------------------------
+# 8. OS and temporary / swap files
+# ------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.orig
+*.rej
+
+# ------------------------------------------------------------------
+# 9. Make system outputs
+# ------------------------------------------------------------------
+# --- CMake ---
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+CMakeUserPresets.json
+Testing/
+
+# --- Ninja ---
+*.ninja*
+
+# ------------------------------------------------------------------
+# 10. Logs,personal config (never commit)
+# ------------------------------------------------------------------
+*.log
+.gitconfig
