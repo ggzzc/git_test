@@ -124,3 +124,35 @@ jobs:
 
       - name: 单元测试（严格模式下也确认行为不变）
         run: ctest --test-dir build-strict -C Release --output-on-failure
+
+  # ==================================================================
+  # 第 3 步：cppcheck 静态分析
+  #   与编译无关：直接扫描源码找空指针、越界、未初始化、冗余代码、
+  #   可移植性问题等。--error-exitcode=1 -> 只要有一处发现就让作业失败。
+  #   只跑 Linux 即可：分析的是源码，结果与平台无关。
+  # ==================================================================
+  cppcheck:
+    name: static analysis (cppcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+          cppcheck --version
+
+      - name: 运行 cppcheck
+        run: |
+          cppcheck \
+            --enable=warning,performance,portability,style \
+            --error-exitcode=1 \
+            --std=c11 \
+            --language=c \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            --template='{file}:{line}: {severity}: {message} [{id}]' \
+            -Iinc \
+            src tests
