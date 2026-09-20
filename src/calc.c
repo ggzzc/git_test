@@ -52,17 +52,17 @@ long long calc_fact(int n)
 double calc_sqrt(double x)
 {
     double r;
-    double next;
     int i;
 
     if (x <= 0.0) {
         return 0.0;   /* 负数无实数平方根，与 calc_div 的约定一致 */
     }
 
-    /* 牛顿迭代：r(n+1) = (r(n) + x / r(n)) / 2 */
+    /* 牛顿迭代：r(n+1) = (r(n) + x / r(n)) / 2
+     * next 声明在循环体内，作用域收窄到使用处（cppcheck variableScope） */
     r = x;
     for (i = 0; i < 40; i++) {
-        next = 0.5 * (r + x / r);
+        double next = 0.5 * (r + x / r);
         if (next == r) {
             break;    /* 已达到 double 精度上限 */
         }

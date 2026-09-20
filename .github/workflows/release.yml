@@ -1,0 +1,81 @@
+# ==================================================================
+# Release —— 打 tag 时构建并发布可执行文件（CD）
+# ------------------------------------------------------------------
+# 触发：推送形如 v* 的标签，例如
+#     git tag -a v0.2.0 -m "v0.2.0: ..."
+#     git push origin v0.2.0
+# 产物：dist/calc_demo-<平台>[.exe] + SHA256SUMS.txt，上传到对应的 GitHub Release
+#
+# 为什么用 gh CLI 而不是 softprops/action-gh-release 这类第三方 action：
+#   * gh 已预装在 GitHub 托管的 runner 上，无需再引入依赖
+#   * 少一个供应链环节，也不会因为 action 的 Node 运行时升级而收到弃用警告
+# ==================================================================
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# 创建 / 更新 Release 需要写权限（GITHUB_TOKEN 默认是只读的）
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: build & publish (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,   os: ubuntu-latest }
+          - { name: windows-x86_64, os: windows-latest }
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      # 单配置生成器：构建类型在配置阶段决定
+      - name: 配置（单配置生成器）
+        if: runner.os != 'Windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      # 多配置生成器：不传 CMAKE_BUILD_TYPE，构建类型交给 --config
+      - name: 配置（多配置生成器）
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build
+
+      - name: 编译
+        run: cmake --build build --config Release --parallel
+
+      # 发布前把关：测试不过就不发
+      - name: 单元测试
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # 统一产物命名并生成校验和。
+      # 用 bash：Windows runner 上也自带 Git Bash，且两个平台都有 sha256sum。
+      # 注意 sha256sum 的 glob 要写成 calc_demo-*，否则会把刚创建的空
+      # SHA256SUMS.txt 自身也算进去（重定向先建文件，glob 后展开）。
+      - name: 打包
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ -f build/calc_demo ]; then
+            cp build/calc_demo "dist/calc_demo-${{ matrix.name }}"
+          else
+            cp build/Release/calc_demo.exe "dist/calc_demo-${{ matrix.name }}.exe"
+          fi
+          cd dist
+          sha256sum calc_demo-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # 两个平台并行时：谁先到谁创建 Release，另一个只上传文件
+      - name: 创建或更新 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # 已存在时会报错，忽略即可（这正是并发时的正常情况）
+          gh release create "$tag" --title "$tag" --generate-notes || true
+          # 上传本平台产物；同一文件重复上传时覆盖
+          gh release upload "$tag" dist/* --clobber

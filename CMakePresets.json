@@ -1,0 +1,82 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "mingw",
+      "displayName": "GCC / MinGW Makefiles (Release)",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/cmake-build-mingw",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "msvc",
+      "displayName": "Default generator (Visual Studio / MSVC on Windows)",
+      "binaryDir": "${sourceDir}/cmake-build-msvc",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "GCC + gcov coverage (Debug)",
+      "inherits": "mingw",
+      "binaryDir": "${sourceDir}/cmake-build-coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_COVERAGE": "ON"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    {
+      "name": "mingw",
+      "configurePreset": "mingw"
+    },
+    {
+      "name": "msvc",
+      "configurePreset": "msvc",
+      "configuration": "Release"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    }
+  ],
+
+  "testPresets": [
+    {
+      "name": "mingw",
+      "configurePreset": "mingw",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "msvc",
+      "configurePreset": "msvc",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
+      "output": { "outputOnFailure": true }
+    }
+  ],
+
+  "workflowPresets": [
+    {
+      "name": "check",
+      "displayName": "Configure + build + test (GCC, one command)",
+      "steps": [
+        { "type": "configure", "name": "mingw" },
+        { "type": "build", "name": "mingw" },
+        { "type": "test", "name": "mingw" }
+      ]
+    }
+  ]
+}
