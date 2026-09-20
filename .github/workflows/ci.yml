@@ -1,0 +1,326 @@
+# ==================================================================
+# CI —— 编译测试 + 静态检查 + 动态检查
+# ------------------------------------------------------------------
+# 本文件包含的作业：
+#   1) build-and-test   4 平台编译 + 单元测试（gcc / clang / AppleClang / MSVC）
+#   2) strict-warnings  告警即错误（GCC/Clang 的 -Werror、MSVC 的 /WX）
+#   3) cppcheck         源码级静态分析（空指针、越界、作用域、冗余代码等）
+#   4) clang-tidy       基于 compile_commands.json 的语义级检查
+#   5) sanitizers       ASan + UBSan 运行时检查（越界/泄漏/未定义行为）
+# ------------------------------------------------------------------
+# 说明：
+#   * build-and-test 刻意使用"原始 CMake 命令"而不是本仓库的预设，
+#     因为预设里的 mingw 用 MinGW Makefiles 生成器，Linux/macOS runner 没有。
+#   * 动态检查（sanitizer / valgrind）只能跑 Linux：
+#     MinGW 没有 ASan，MSVC 不支持 UBSan。
+# ==================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**']
+  pull_request:
+    branches: [main, develop]
+
+# 同一分支连续推送时取消上一个未跑完的任务，节省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build & test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - name: linux-clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - name: macos-clang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+          # Windows 用默认生成器（Visual Studio 2022）。
+          # VS 生成器不读取 CC/CXX 环境变量，因此这里留空。
+          - name: windows-msvc
+            os: windows-latest
+            cc: ''
+            cxx: ''
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      # checkout v5 面向 Node.js 24；v4 面向 Node.js 20，会触发
+      # "Node.js 20 is deprecated" 警告（每个作业一条，共 7 条）
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      # 单配置生成器（Linux/macOS 的 Unix Makefiles）：构建类型在配置阶段决定
+      - name: 配置（单配置生成器）
+        if: runner.os != 'Windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      # 多配置生成器（Windows 的 Visual Studio）：构建类型在编译阶段用 --config 决定，
+      # 这里传 CMAKE_BUILD_TYPE 是无效的，会打印 "Manually-specified variables were not used" 警告
+      - name: 配置（多配置生成器）
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build
+
+      - name: 编译
+        run: cmake --build build --config Release --parallel
+
+      - name: 单元测试
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: 冒烟运行 demo（非 Windows）
+        if: runner.os != 'Windows'
+        run: ./build/calc_demo
+
+  # ==================================================================
+  # 第 2 步：严格告警（告警即错误）
+  #   ENABLE_WERROR=ON -> GCC/Clang 追加 -Werror、MSVC 追加 /WX
+  #   与 build-and-test 的区别：那边的告警只是打印，这里的告警直接让作业失败
+  # ==================================================================
+  strict-warnings:
+    name: strict warnings (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+            configureArgs: '-DCMAKE_BUILD_TYPE=Release'
+          - name: linux-clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+            configureArgs: '-DCMAKE_BUILD_TYPE=Release'
+          # 多配置生成器（Visual Studio）不使用 CMAKE_BUILD_TYPE，
+          # 因此这里留空不传，构建类型交给下面的 --config Release。
+          - name: windows-msvc
+            os: windows-latest
+            cc: ''
+            cxx: ''
+            configureArgs: ''
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 配置（开启 -Werror / /WX）
+        run: cmake -S . -B build-strict ${{ matrix.configureArgs }} -DENABLE_WERROR=ON
+
+      - name: 编译（只要有一条告警就失败）
+        run: cmake --build build-strict --config Release --parallel
+
+      - name: 单元测试（严格模式下也确认行为不变）
+        run: ctest --test-dir build-strict -C Release --output-on-failure
+
+  # ==================================================================
+  # 第 3 步：cppcheck 静态分析
+  #   与编译无关：直接扫描源码找空指针、越界、未初始化、冗余代码、
+  #   可移植性问题等。--error-exitcode=1 -> 只要有一处发现就让作业失败。
+  #   只跑 Linux 即可：分析的是源码，结果与平台无关。
+  # ==================================================================
+  cppcheck:
+    name: static analysis (cppcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+          cppcheck --version
+
+      - name: 运行 cppcheck
+        run: |
+          cppcheck \
+            --enable=warning,performance,portability,style \
+            --error-exitcode=1 \
+            --std=c11 \
+            --language=c \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            --template='{file}:{line}: {severity}: {message} [{id}]' \
+            -Iinc \
+            src tests
+
+  # ==================================================================
+  # 第 4 步：clang-tidy 语义级检查
+  #   与 cppcheck 的区别：clang-tidy 需要 compile_commands.json，
+  #   用真实编译参数（-std=c11、-Iinc）建立 AST 后再检查，
+  #   能发现类型转换、控制流、API 误用等更"语义"的问题。
+  #   检查项与"告警即错误"都定义在仓库根的 .clang-tidy 里，
+  #   因此本地跑同样的命令就能复现 CI 的结论。
+  # ==================================================================
+  clang-tidy:
+    name: static analysis (clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 clang 与 clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang clang-tidy
+          clang --version
+          clang-tidy --version
+
+      # 编译数据库用 clang 生成，保证 clang-tidy 拿到的参数与实际编译器一致
+      - name: 生成 compile_commands.json
+        run: cmake -S . -B build-tidy -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug
+
+      - name: 运行 clang-tidy
+        run: |
+          clang-tidy -p build-tidy src/calc.c src/main.c tests/test_calc.c
+
+  # ==================================================================
+  # 动态检查 1：ASan + UBSan
+  #   与静态检查的区别：这次"真跑起来"，由编译器插桩在运行时抓
+  #     越界访问、释放后使用、内存泄漏、整数溢出、未定义行为等。
+  #   只能跑 Linux：MinGW 没有 ASan，MSVC 不支持 UBSan。
+  # ==================================================================
+  sanitizers:
+    name: dynamic (ASan + UBSan, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gcc,   cc: gcc,   cxx: g++ }
+          - { name: clang, cc: clang, cxx: clang++ }
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 配置（开启 ASan + UBSan）
+        run: |
+          cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: 编译
+        run: cmake --build build-asan --parallel
+
+      - name: 单元测试（越界 / 泄漏 / 未定义行为都会让作业失败）
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:strict_string_checks=1"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: ctest --test-dir build-asan --output-on-failure
+
+      - name: 冒烟运行 demo
+        env:
+          ASAN_OPTIONS: "detect_leaks=1"
+          UBSAN_OPTIONS: "print_stacktrace=1"
+        run: ./build-asan/calc_demo
+
+  # ==================================================================
+  # 动态检查 2：Valgrind（memcheck）
+  #   补 ASan 之外的内容：未初始化内存的读取、非法释放、更细的泄漏分类。
+  #   注意：Valgrind 与 ASan 是两套内存检测机制，不能同时启用，
+  #   所以这里用普通 Debug 构建（不加 sanitizer）。
+  # ==================================================================
+  valgrind:
+    name: dynamic (Valgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 Valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          valgrind --version
+
+      - name: 配置（Debug，不加 sanitizer）
+        run: cmake -S . -B build-vg -DCMAKE_BUILD_TYPE=Debug
+
+      - name: 编译
+        run: cmake --build build-vg --parallel
+
+      # 注意路径：test_calc 的目标定义在 tests/ 子目录里，
+      # 所以产物在 <构建目录>/tests/ 下，而不是构建目录根（calc_demo 才在根）
+      - name: 用 Valgrind 跑单元测试
+        run: |
+          valgrind \
+            --error-exitcode=1 \
+            --leak-check=full \
+            --track-origins=yes \
+            ./build-vg/tests/test_calc
+
+      - name: 用 Valgrind 跑 demo
+        run: |
+          valgrind --error-exitcode=1 --leak-check=full ./build-vg/calc_demo
+
+  # ==================================================================
+  # 覆盖率：gcov + gcovr
+  #   跑一遍测试，统计 src/ 里哪些行真正被执行过；
+  #   XML（给工具）/ HTML（给人看）报告作为 artifact 上传。
+  #   注意：--coverage 是 GCC/Clang 的插桩选项，CMakeLists 里已做编译器判断。
+  # ==================================================================
+  coverage:
+    name: coverage (gcov + gcovr)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 gcovr
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcovr
+          gcovr --version
+
+      - name: 配置（开启覆盖率插桩）
+        run: cmake -S . -B build-cov -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+
+      - name: 编译
+        run: cmake --build build-cov --parallel
+
+      - name: 运行单元测试
+        run: ctest --test-dir build-cov --output-on-failure
+
+      # 顺带跑一次 demo，这样 main.c 里的语句也算被执行过
+      - name: 运行 demo
+        run: ./build-cov/calc_demo
+
+      - name: 覆盖率摘要（打印到日志）
+        run: gcovr -r . --exclude 'tests/.*'
+
+      - name: 生成报告文件
+        run: |
+          gcovr -r . \
+            --exclude 'tests/.*' \
+            --xml coverage.xml \
+            --html coverage.html
+
+      - name: 上传报告
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage.html
+
+      # 想让覆盖率不达标就失败时，把下面这行加到上面的 gcovr 命令里：
+      #   --fail-under-line 90     （按行覆盖率低于 90% 即退出非 0）

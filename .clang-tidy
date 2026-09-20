@@ -1,0 +1,29 @@
+# ------------------------------------------------------------------
+# clang-tidy 配置 —— 本地与 CI 共用
+#
+#   CI 里的调用形式： clang-tidy -p build-tidy src/calc.c src/main.c tests/test_calc.c
+#   本地同样可用（先 cmake -S . -B build-tidy -DCMAKE_C_COMPILER=clang 生成编译数据库）
+#
+#   Checks           : 启用的检查项（逗号分隔的 glob，前导 - 表示排除）
+#   WarningsAsErrors : '*' 表示把所有告警当错误 -> 有发现即返回非 0，CI 作业失败
+#   HeaderFilterRegex: 只报告项目自身头文件的问题，系统头文件不报
+#   FormatStyle      : none = 不掺入 clang-format 的格式化建议
+# ------------------------------------------------------------------
+Checks: >-
+  clang-analyzer-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cert-*,
+  -cert-err33-c,
+  performance-*
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'inc/.*'
+FormatStyle: none
+
+# 两处刻意排除（都属于"对本项目无意义"的噪声，而不是掩盖问题）：
+#   bugprone-easily-swappable-parameters
+#       数学接口 f(int a, int b) 的同类型参数天然可互换（加法/减法/除法都是如此），
+#       强行改签名只会降低可读性。
+#   cert-err33-c
+#       要求检查 printf 等函数的返回值；演示程序不需要为输出失败写错误处理。
