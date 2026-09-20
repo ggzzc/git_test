@@ -1,14 +1,18 @@
 # ==================================================================
-# CI —— 编译测试 + 静态检查（阶段 2 的全部内容）
+# CI —— 编译测试 + 静态检查 + 动态检查
 # ------------------------------------------------------------------
-# 本文件包含 4 个作业：
+# 本文件包含的作业：
 #   1) build-and-test   4 平台编译 + 单元测试（gcc / clang / AppleClang / MSVC）
 #   2) strict-warnings  告警即错误（GCC/Clang 的 -Werror、MSVC 的 /WX）
 #   3) cppcheck         源码级静态分析（空指针、越界、作用域、冗余代码等）
 #   4) clang-tidy       基于 compile_commands.json 的语义级检查
+#   5) sanitizers       ASan + UBSan 运行时检查（越界/泄漏/未定义行为）
 # ------------------------------------------------------------------
-# 说明：build-and-test 刻意使用"原始 CMake 命令"而不是本仓库的预设，
-#       因为预设里的 mingw 使用 MinGW Makefiles 生成器，Linux/macOS runner 没有它。
+# 说明：
+#   * build-and-test 刻意使用"原始 CMake 命令"而不是本仓库的预设，
+#     因为预设里的 mingw 用 MinGW Makefiles 生成器，Linux/macOS runner 没有。
+#   * 动态检查（sanitizer / valgrind）只能跑 Linux：
+#     MinGW 没有 ASan，MSVC 不支持 UBSan。
 # ==================================================================
 name: CI
 
@@ -185,3 +189,46 @@ jobs:
       - name: 运行 clang-tidy
         run: |
           clang-tidy -p build-tidy src/calc.c src/main.c tests/test_calc.c
+
+  # ==================================================================
+  # 动态检查 1：ASan + UBSan
+  #   与静态检查的区别：这次"真跑起来"，由编译器插桩在运行时抓
+  #     越界访问、释放后使用、内存泄漏、整数溢出、未定义行为等。
+  #   只能跑 Linux：MinGW 没有 ASan，MSVC 不支持 UBSan。
+  # ==================================================================
+  sanitizers:
+    name: dynamic (ASan + UBSan, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gcc,   cc: gcc,   cxx: g++ }
+          - { name: clang, cc: clang, cxx: clang++ }
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 配置（开启 ASan + UBSan）
+        run: |
+          cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: 编译
+        run: cmake --build build-asan --parallel
+
+      - name: 单元测试（越界 / 泄漏 / 未定义行为都会让作业失败）
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:strict_string_checks=1"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: ctest --test-dir build-asan --output-on-failure
+
+      - name: 冒烟运行 demo
+        env:
+          ASAN_OPTIONS: "detect_leaks=1"
+          UBSAN_OPTIONS: "print_stacktrace=1"
+        run: ./build-asan/calc_demo
