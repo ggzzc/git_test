@@ -1,5 +1,7 @@
 # calc demo
 
+![CI](https://github.com/ggzzc/git_test/actions/workflows/ci.yml/badge.svg)
+
 一个用于演示 C 项目工程化的计算器示例（加法/减法/乘法/除法/幂/阶乘/开方）。
 
 ## 目录结构
