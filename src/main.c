@@ -19,5 +19,6 @@ int main(void)
     printf("\n");
     printf("2 ^ 10     = %lld\n", calc_pow(2, 10));
     printf("10!        = %lld\n", calc_fact(10));
+    printf("\n");
     return 0;
 }
