@@ -64,6 +64,8 @@ build/
 cmake-build-*/
 /out/
 /bin/
+# Release 打包输出：release.yml 里生成 dist/，本地跑同样的打包步骤也会用到
+dist/
 
 # ------------------------------------------------------------------
 # 7. Editors / IDEs / code indexing

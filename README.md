@@ -10,6 +10,9 @@
 - `src/main.c` 演示程序
 - `tests/test_calc.c` 单元测试（零依赖，27 条断言）
 - `Makefile` / `CMakeLists.txt` / `CMakePresets.json` 构建与预设
+- `.clang-tidy` 静态检查规则（本地与 CI 共用）
+- `.github/workflows/ci.yml` 持续集成（7 个作业）
+- `.github/workflows/release.yml` 持续发布（打 `v*` 标签触发）
 
 ## 快速上手（推荐）
 
@@ -150,10 +153,36 @@ FAIL tests/test_calc.c:68  ABS_DIFF((calc_sqrt(-4.0)), (0.0)) < (1e-9)
 27 checks, 1 failed
 ```
 
+## 持续集成 / 持续发布
+
+分支模型：`main` 是发布线，`develop` 是集成线，功能开发从 `develop` 开出 `feature/*`。
+**`main` 只接收来自 `develop` 的合并**，合并后打 tag 发布。
+
+**CI** —— `.github/workflows/ci.yml`，push / PR 触发，共 7 个作业：
+
+| 作业 | 内容 |
+|---|---|
+| `build-and-test` | 4 平台编译 + 单元测试：linux-gcc / linux-clang / macos-clang / windows-msvc |
+| `strict-warnings` | 告警即错误：GCC/Clang 的 `-Werror`、MSVC 的 `/WX`（`ENABLE_WERROR=ON`） |
+| `cppcheck` | 源码级静态分析，`--error-exitcode=1`，有发现即失败 |
+| `clang-tidy` | 语义级检查，规则见 `.clang-tidy`（本地跑同样命令可复现结论） |
+| `sanitizers` | ASan + UBSan 运行时检查（gcc / clang），抓越界、泄漏、未定义行为 |
+| `valgrind` | memcheck：内存泄漏、未初始化读取（Linux） |
+| `coverage` | gcov + gcovr，XML/HTML 报告作为 artifact 上传 |
+
+> 动态检查（sanitizer / valgrind）只跑 Linux：MinGW 没有 ASan，MSVC 不支持 UBSan。
+
+**CD** —— `.github/workflows/release.yml`，推送 `v*` 标签触发：
+
+```bash
+git tag -a v0.2.3 -m "v0.2.3: ..."
+git push --follow-tags
+```
+
+流程：矩阵编译 linux / windows → 各自上传 artifact → 单个 `publish` 作业合并全部产物、
+生成覆盖所有平台的 `SHA256SUMS.txt`、创建 GitHub Release 并上传。
+
 ## 开发状态
-- 分支：`main`（稳定）/ `develop`（集成）/ `feature/*`（功能）
-- 工具链：gcc —— MinGW Makefiles（`mingw` 预设）；MSVC —— 默认生成器（`msvc` 预设）
-- 构建：CMakePresets + make 快捷目标（`cb` / `ct` / `cr` / `cc`）；另有不经 CMake 的 gcc 直编通道
-- 测试：`tests/test_calc.c`，由 CTest 驱动（`ctest --preset mingw`）
-- 最近完成：`calc_sqrt`、CMake 构建、CMakePresets 与 make 快捷目标、单元测试
-- 下一步：GitHub Actions CI（cppcheck / clang-tidy / ASan / Valgrind / 覆盖率）、Release 打包
+- 最近完成：`calc_sqrt`、CMake 构建与 CMakePresets、单元测试、完整 CI/CD（CI 7 作业 + tag 自动发布）
+- 下一步：为 `main` / `develop` 启用分支保护（Require PR + Require status checks，并禁止直推 `main`）
+- 可选的后续：更多数学函数（含溢出检测）、把 CI 徽章状态写进本文档、给覆盖率设下限（`gcovr --fail-under-line`）
