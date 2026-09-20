@@ -232,3 +232,93 @@ jobs:
           ASAN_OPTIONS: "detect_leaks=1"
           UBSAN_OPTIONS: "print_stacktrace=1"
         run: ./build-asan/calc_demo
+
+  # ==================================================================
+  # 动态检查 2：Valgrind（memcheck）
+  #   补 ASan 之外的内容：未初始化内存的读取、非法释放、更细的泄漏分类。
+  #   注意：Valgrind 与 ASan 是两套内存检测机制，不能同时启用，
+  #   所以这里用普通 Debug 构建（不加 sanitizer）。
+  # ==================================================================
+  valgrind:
+    name: dynamic (Valgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 Valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          valgrind --version
+
+      - name: 配置（Debug，不加 sanitizer）
+        run: cmake -S . -B build-vg -DCMAKE_BUILD_TYPE=Debug
+
+      - name: 编译
+        run: cmake --build build-vg --parallel
+
+      - name: 用 Valgrind 跑单元测试
+        run: |
+          valgrind \
+            --error-exitcode=1 \
+            --leak-check=full \
+            --track-origins=yes \
+            ./build-vg/test_calc
+
+      - name: 用 Valgrind 跑 demo
+        run: |
+          valgrind --error-exitcode=1 --leak-check=full ./build-vg/calc_demo
+
+  # ==================================================================
+  # 覆盖率：gcov + gcovr
+  #   跑一遍测试，统计 src/ 里哪些行真正被执行过；
+  #   XML（给工具）/ HTML（给人看）报告作为 artifact 上传。
+  #   注意：--coverage 是 GCC/Clang 的插桩选项，CMakeLists 里已做编译器判断。
+  # ==================================================================
+  coverage:
+    name: coverage (gcov + gcovr)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 gcovr
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcovr
+          gcovr --version
+
+      - name: 配置（开启覆盖率插桩）
+        run: cmake -S . -B build-cov -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+
+      - name: 编译
+        run: cmake --build build-cov --parallel
+
+      - name: 运行单元测试
+        run: ctest --test-dir build-cov --output-on-failure
+
+      # 顺带跑一次 demo，这样 main.c 里的语句也算被执行过
+      - name: 运行 demo
+        run: ./build-cov/calc_demo
+
+      - name: 覆盖率摘要（打印到日志）
+        run: gcovr -r . --exclude 'tests/.*'
+
+      - name: 生成报告文件
+        run: |
+          gcovr -r . \
+            --exclude 'tests/.*' \
+            --xml coverage.xml \
+            --html coverage.html
+
+      - name: 上传报告
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage.html
+
+      # 想让覆盖率不达标就失败时，把下面这行加到上面的 gcovr 命令里：
+      #   --fail-under-line 90     （按行覆盖率低于 90% 即退出非 0）
