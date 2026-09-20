@@ -89,7 +89,7 @@ cmake --build cmake-build-msvc --config Debug
 
 | 预设 | 可执行文件 | 单元测试程序 |
 |---|---|---|
-| `mingw` | `cmake-build-mingw/calc_demo.exe` | `cmake-build-mingw/test_calc.exe` |
+| `mingw` | `cmake-build-mingw/calc_demo.exe` | `cmake-build-mingw/tests/test_calc.exe` |
 | `msvc` | `cmake-build-msvc/Release/calc_demo.exe` | `cmake-build-msvc/tests/Release/test_calc.exe` |
 
 **覆盖率**（仅 GCC / Clang）：

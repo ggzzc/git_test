@@ -258,13 +258,15 @@ jobs:
       - name: 编译
         run: cmake --build build-vg --parallel
 
+      # 注意路径：test_calc 的目标定义在 tests/ 子目录里，
+      # 所以产物在 <构建目录>/tests/ 下，而不是构建目录根（calc_demo 才在根）
       - name: 用 Valgrind 跑单元测试
         run: |
           valgrind \
             --error-exitcode=1 \
             --leak-check=full \
             --track-origins=yes \
-            ./build-vg/test_calc
+            ./build-vg/tests/test_calc
 
       - name: 用 Valgrind 跑 demo
         run: |
