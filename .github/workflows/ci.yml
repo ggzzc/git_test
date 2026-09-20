@@ -1,15 +1,14 @@
 # ==================================================================
-# CI —— 阶段 2 第 1 步：多平台编译 + 单元测试
+# CI —— 编译测试 + 静态检查（阶段 2 的全部内容）
 # ------------------------------------------------------------------
-# 覆盖四种工具链组合，确保代码在 gcc / clang / MSVC 下都能编译并通过测试：
-#   linux-gcc、linux-clang、macos-clang（AppleClang）、windows-msvc
-# 这里刻意使用"原始 CMake 命令"而不是本仓库的预设：
-#   预设里的 mingw 使用 MinGW Makefiles 生成器，Linux/macOS runner 没有它。
+# 本文件包含 4 个作业：
+#   1) build-and-test   4 平台编译 + 单元测试（gcc / clang / AppleClang / MSVC）
+#   2) strict-warnings  告警即错误（GCC/Clang 的 -Werror、MSVC 的 /WX）
+#   3) cppcheck         源码级静态分析（空指针、越界、作用域、冗余代码等）
+#   4) clang-tidy       基于 compile_commands.json 的语义级检查
 # ------------------------------------------------------------------
-# 后续步骤会在本文件追加作业：
-#   第 2 步：-Werror 严格编译（告警即错误）
-#   第 3 步：cppcheck 静态分析
-#   第 4 步：clang-tidy 语义级检查
+# 说明：build-and-test 刻意使用"原始 CMake 命令"而不是本仓库的预设，
+#       因为预设里的 mingw 使用 MinGW Makefiles 生成器，Linux/macOS runner 没有它。
 # ==================================================================
 name: CI
 
@@ -156,3 +155,33 @@ jobs:
             --template='{file}:{line}: {severity}: {message} [{id}]' \
             -Iinc \
             src tests
+
+  # ==================================================================
+  # 第 4 步：clang-tidy 语义级检查
+  #   与 cppcheck 的区别：clang-tidy 需要 compile_commands.json，
+  #   用真实编译参数（-std=c11、-Iinc）建立 AST 后再检查，
+  #   能发现类型转换、控制流、API 误用等更"语义"的问题。
+  #   检查项与"告警即错误"都定义在仓库根的 .clang-tidy 里，
+  #   因此本地跑同样的命令就能复现 CI 的结论。
+  # ==================================================================
+  clang-tidy:
+    name: static analysis (clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 clang 与 clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang clang-tidy
+          clang --version
+          clang-tidy --version
+
+      # 编译数据库用 clang 生成，保证 clang-tidy 拿到的参数与实际编译器一致
+      - name: 生成 compile_commands.json
+        run: cmake -S . -B build-tidy -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug
+
+      - name: 运行 clang-tidy
+        run: |
+          clang-tidy -p build-tidy src/calc.c src/main.c tests/test_calc.c
